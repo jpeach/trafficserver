@@ -84,13 +84,12 @@ NetProcessor::main_accept(Continuation *cont, SOCKET fd, AcceptOptions const &op
 Action *
 UnixNetProcessor::accept_internal(Continuation *cont, int fd, AcceptOptions const &opt)
 {
-  EventType upgraded_etype = opt.etype; // setEtype requires non-const ref.
-  ProxyMutex *mutex        = this_ethread()->mutex.get();
-  int accept_threads       = opt.accept_threads; // might be changed.
-  IpEndpoint accept_ip;                          // local binding address.
+  ProxyMutex *mutex  = this_ethread()->mutex.get();
+  int accept_threads = opt.accept_threads; // might be changed.
+  IpEndpoint accept_ip;                    // local binding address.
   char thr_name[MAX_THREAD_NAME_LENGTH];
 
-  NetAccept *na = createNetAccept();
+  NetAccept *na = createNetAccept(opt);
 
   // Fill in accept thread from configuration if necessary.
   if (opt.accept_threads < 0) {
@@ -114,9 +113,9 @@ UnixNetProcessor::accept_internal(Continuation *cont, int fd, AcceptOptions cons
   na->accept_fn = net_accept; // All callers used this.
   na->server.fd = fd;
   ats_ip_copy(&na->server.accept_addr, &accept_ip);
-  na->server.f_inbound_transparent = opt.f_inbound_transparent;
+
   if (opt.f_inbound_transparent) {
-    Debug("http_tproxy", "Marking accept server %p on port %d as inbound transparent", na, opt.local_port);
+    Debug("http_tproxy", "Marked accept server %p on port %d as inbound transparent", na, opt.local_port);
   }
 
   int should_filter_int         = 0;
@@ -125,19 +124,14 @@ UnixNetProcessor::accept_internal(Continuation *cont, int fd, AcceptOptions cons
   if (should_filter_int > 0 && opt.etype == ET_NET)
     na->server.http_accept_filter = true;
 
-  na->action_          = new NetAcceptAction();
-  *na->action_         = cont;
-  na->action_->server  = &na->server;
-  na->callback_on_open = opt.f_callback_on_open;
-  na->recv_bufsize     = opt.recv_bufsize;
-  na->send_bufsize     = opt.send_bufsize;
-  na->sockopt_flags    = opt.sockopt_flags;
-  na->packet_mark      = opt.packet_mark;
-  na->packet_tos       = opt.packet_tos;
-  na->etype            = upgraded_etype;
-  na->backdoor         = opt.backdoor;
-  if (na->callback_on_open)
+  na->action_         = new NetAcceptAction();
+  *na->action_        = cont;
+  na->action_->server = &na->server;
+
+  if (na->opt.f_callback_on_open) {
     na->mutex = cont->mutex;
+  }
+
   if (opt.frequent_accept) { // true
     if (accept_threads > 0) {
       if (0 == na->do_listen(BLOCKING, opt.f_inbound_transparent)) {
@@ -438,9 +432,9 @@ UnixNetProcessor::start(int, size_t)
 // Virtual function allows creation of an
 // SSLNetAccept or NetAccept transparent to NetProcessor.
 NetAccept *
-UnixNetProcessor::createNetAccept()
+UnixNetProcessor::createNetAccept(const NetProcessor::AcceptOptions &opt)
 {
-  return new NetAccept;
+  return new NetAccept(opt);
 }
 
 NetVConnection *
